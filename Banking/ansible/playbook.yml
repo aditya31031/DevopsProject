@@ -1,0 +1,74 @@
+---
+- name: Provision Banking App Server
+  hosts: webservers
+  become: yes
+  vars:
+    node_version: "20"
+    app_dir: /opt/banking-app
+
+  roles:
+    - web
+    - db
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - git
+          - ufw
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Install Node.js {{ node_version }}
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_{{ node_version }}.x | bash -
+        apt-get install -y nodejs
+
+    - name: Install Docker
+      shell: |
+        curl -fsSL https://get.docker.com | bash
+        usermod -aG docker {{ ansible_user }}
+      args:
+        creates: /usr/bin/docker
+
+    - name: Install Docker Compose
+      get_url:
+        url: https://github.com/docker/compose/releases/latest/download/docker-compose-Linux-x86_64
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Configure UFW firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "80"
+        - "443"
+        - "5000"
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes

@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-backend-service
+  namespace: banking
+spec:
+  selector:
+    app: banking-backend
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-frontend-service
+  namespace: banking
+spec:
+  selector:
+    app: banking-frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: banking
+spec:
+  selector:
+    app: mongodb
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+  type: ClusterIP

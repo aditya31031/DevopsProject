@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "banking-api"
+        DOCKER_REGISTRY = credentials('docker-hub-credentials')
+        KUBECONFIG = credentials('kubeconfig')
+        NODE_VERSION = '20'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Branch: ${env.BRANCH_NAME} | Commit: ${env.GIT_COMMIT[0..7]}"
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm ci'
+            }
+        }
+
+        stage('Run Tests') {
+            environment {
+                NODE_ENV = 'test'
+                MONGO_TEST_URI = 'mongodb://localhost:27017/banking_test_db'
+                JWT_SECRET = 'jenkins-test-secret'
+                JWT_EXPIRES_IN = '1d'
+            }
+            steps {
+                sh 'npm test'
+            }
+            post {
+                always {
+                    junit 'coverage/junit.xml'
+                    publishHTML(target: [
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'coverage/lcov-report',
+                        reportFiles: 'index.html',
+                        reportName: 'Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            when { branch 'main' }
+            steps {
+                script {
+                    def imageTag = "sha-${env.GIT_COMMIT[0..7]}"
+                    docker.build("${DOCKER_IMAGE}:${imageTag}", "--target production .")
+                    docker.build("${DOCKER_IMAGE}:latest", "--target production .")
+                }
+            }
+        }
+
+        stage('Push to Registry') {
+            when { branch 'main' }
+            steps {
+                script {
+                    def imageTag = "sha-${env.GIT_COMMIT[0..7]}"
+                    docker.withRegistry('https://registry.hub.docker.com', DOCKER_REGISTRY) {
+                        docker.image("${DOCKER_IMAGE}:${imageTag}").push()
+                        docker.image("${DOCKER_IMAGE}:latest").push()
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            when { branch 'main' }
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig']) {
+                    sh '''
+                        kubectl apply -f k8s/namespace.yaml
+                        kubectl apply -f k8s/configmap.yaml
+                        kubectl apply -f k8s/
+                        kubectl set image deployment/banking-backend \
+                            banking-backend=${DOCKER_IMAGE}:sha-${GIT_COMMIT:0:7} \
+                            -n banking
+                        kubectl rollout status deployment/banking-backend -n banking --timeout=120s
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+        failure {
+            echo '❌ Pipeline failed! Check logs above.'
+            mail(
+                to: 'devops@bank.com',
+                subject: "Pipeline Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Build failed: ${env.BUILD_URL}"
+            )
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
